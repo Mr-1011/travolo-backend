@@ -176,6 +176,79 @@ app.post('/api/destinations/:destinationId/feedback', async (req, res) => {
   }
 });
 
+// New endpoint to submit feedback (like/dislike) for a recommended destination
+app.post('/api/recommendations/:recommendationId/feedback', async (req, res) => {
+  try {
+    const { recommendationId } = req.params;
+    const { destinationId, feedback } = req.body; // e.g., { destinationId: "uuid", feedback: "like" | "dislike" }
+
+    // --- Input Validation ---
+    if (!recommendationId) {
+      return res.status(400).json({ error: 'Recommendation ID is required in the URL path.' });
+    }
+    if (!destinationId || typeof destinationId !== 'string') {
+      return res.status(400).json({ error: 'Destination ID is required in the request body.' });
+    }
+    if (!feedback || (feedback !== 'like' && feedback !== 'dislike')) {
+      return res.status(400).json({ error: 'Feedback must be either "like" or "dislike".' });
+    }
+
+    // --- Fetch the recommendation record ---
+    const { data: recommendation, error: fetchError } = await supabase
+      .from('recommendations')
+      .select('destination_1_id, destination_2_id, destination_3_id')
+      .eq('id', recommendationId)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching recommendation record:', fetchError);
+      // Check if error is due to record not found
+      if (fetchError.code === 'PGRST116') { // PostgREST code for 'Exact one row expected' failed
+        return res.status(404).json({ error: `Recommendation record with ID ${recommendationId} not found.` });
+      }
+      return res.status(500).json({ error: 'Failed to fetch recommendation record', details: fetchError.message });
+    }
+
+    if (!recommendation) {
+      return res.status(404).json({ error: `Recommendation record with ID ${recommendationId} not found.` });
+    }
+
+    // --- Determine which feedback field to update ---
+    let feedbackFieldToUpdate = null;
+    if (recommendation.destination_1_id === destinationId) {
+      feedbackFieldToUpdate = 'destination_1_feedback';
+    } else if (recommendation.destination_2_id === destinationId) {
+      feedbackFieldToUpdate = 'destination_2_feedback';
+    } else if (recommendation.destination_3_id === destinationId) {
+      feedbackFieldToUpdate = 'destination_3_feedback';
+    }
+
+    if (!feedbackFieldToUpdate) {
+      return res.status(400).json({ error: `Destination ID ${destinationId} does not belong to recommendation record ${recommendationId}.` });
+    }
+
+    // --- Update the feedback field ---
+    const updatePayload = { [feedbackFieldToUpdate]: feedback };
+    const { data: updateData, error: updateError } = await supabase
+      .from('recommendations')
+      .update(updatePayload)
+      .eq('id', recommendationId)
+      .select('id'); // Optionally select data to confirm update
+
+    if (updateError) {
+      console.error('Error updating recommendation feedback:', updateError);
+      return res.status(500).json({ error: 'Failed to update feedback', details: updateError.message });
+    }
+
+    console.log(`Feedback '${feedback}' submitted for destination ${destinationId} in recommendation ${recommendationId}.`);
+    res.status(200).json({ message: 'Feedback submitted successfully.', updatedRecordId: updateData?.[0]?.id || recommendationId });
+
+  } catch (err) {
+    console.error('Server error submitting recommendation feedback:', err);
+    res.status(500).json({ error: 'Internal server error during feedback submission' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server listening at http://localhost:${port}`);
 });
