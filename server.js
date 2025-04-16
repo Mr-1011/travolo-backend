@@ -135,6 +135,47 @@ app.post('/api/recommendations', async (req, res) => {
   }
 });
 
+// New endpoint to submit feedback for a destination
+app.post('/api/destinations/:destinationId/feedback', async (req, res) => {
+  try {
+    const { destinationId } = req.params;
+    const { feedback } = req.body;
+
+    // Basic validation
+    if (!destinationId) {
+      return res.status(400).json({ error: 'Destination ID is required.' });
+    }
+    if (!feedback || typeof feedback !== 'string' || feedback.trim() === '') {
+      return res.status(400).json({ error: 'Feedback text is required and cannot be empty.' });
+    }
+
+    // Insert feedback into Supabase table
+    const { data, error } = await supabase
+      .from('destination_feedback')
+      .insert([
+        { destination_id: destinationId, feedback_text: feedback.trim() },
+      ])
+      .select(); // Optionally select the inserted data if needed
+
+    if (error) {
+      console.error('Error inserting destination feedback:', error);
+      // Check for foreign key violation (invalid destinationId)
+      if (error.code === '23503') { // Foreign key violation code in PostgreSQL
+        return res.status(404).json({ error: `Destination with ID ${destinationId} not found.`, details: error.message });
+      }
+      return res.status(500).json({ error: 'Failed to submit feedback', details: error.message });
+    }
+
+    console.log(`Feedback submitted for destination ${destinationId}:`, data);
+    // Respond with success (201 Created or 204 No Content if not returning data)
+    res.status(201).json({ message: 'Feedback submitted successfully.', feedback: data ? data[0] : null });
+
+  } catch (err) {
+    console.error('Server error submitting feedback:', err);
+    res.status(500).json({ error: 'Internal server error during feedback submission' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server listening at http://localhost:${port}`);
 });
