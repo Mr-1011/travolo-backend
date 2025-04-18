@@ -59,21 +59,37 @@ app.get('/api/destinations/random', async (req, res) => {
 app.post('/api/preferences/analyze-images', upload.array('images', 3), async (req, res) => {
   try {
     const files = req.files;
+    const preferencesString = req.body.preferences; // Get the stringified preferences
 
     if (!files || files.length === 0) {
       return res.status(400).json({ error: 'No image files uploaded.' });
     }
 
+    if (!preferencesString) {
+      return res.status(400).json({ error: 'Preferences data missing in the request.' });
+    }
+
     console.log(`Received ${files.length} images for analysis.`);
 
-    const analysisResult = await analyzeImagesWithOpenAI(files);
+    // Parse the preferences string into an object
+    let currentPreferences;
+    try {
+      currentPreferences = JSON.parse(preferencesString);
+    } catch (parseError) {
+      console.error("Error parsing preferences JSON:", parseError);
+      return res.status(400).json({ error: 'Invalid preferences JSON format.' });
+    }
 
-    console.log("OpenAI Analysis Result:", analysisResult);
+    // Pass both files and parsed preferences to the service
+    const analysisResult = await analyzeImagesWithOpenAI(files, currentPreferences);
 
-    res.status(200).json({
+    // Prepare the full response object
+    const responsePayload = {
       message: `Successfully received and analyzed ${files.length} images.`,
       analysis: analysisResult
-    });
+    };
+
+    res.status(200).json(responsePayload);
 
   } catch (err) {
     console.error('Error analyzing images:', err);

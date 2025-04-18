@@ -43,7 +43,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
  * @property {string[]} [userPreferences.travelBudget]
  * @property {Record<string, string>} [userPreferences.destinationRatings]
  * @property {object} [userPreferences.photoAnalysis]
- * @property {number} [userPreferences.photoAnalysis.photoCount]
+ * @property {number} [userPreferences.photoAnalysis.imageCount]
  * @property {boolean} [userPreferences.photoAnalysis.adjustmentSuccessful]
  * @property {object} [userPreferences.conversationSummary]
  * @property {number} [userPreferences.conversationSummary.userMessageCount]
@@ -107,15 +107,15 @@ async function generateRecommendations(userPreferences) {
   // --- Map preferences to DB schema (IDs are from the hardcoded data above) ---
   const recordToInsert = {
     // Travel Themes
-    culture: userPreferences.travelThemes?.culture,
-    adventure: userPreferences.travelThemes?.adventure,
-    nature: userPreferences.travelThemes?.nature,
-    beaches: userPreferences.travelThemes?.beaches,
-    nightlife: userPreferences.travelThemes?.nightlife,
-    cuisine: userPreferences.travelThemes?.cuisine,
-    wellness: userPreferences.travelThemes?.wellness,
-    urban: userPreferences.travelThemes?.urban,
-    seclusion: userPreferences.travelThemes?.seclusion,
+    culture: userPreferences.culture,
+    adventure: userPreferences.adventure,
+    nature: userPreferences.nature,
+    beaches: userPreferences.beaches,
+    nightlife: userPreferences.nightlife,
+    cuisine: userPreferences.cuisine,
+    wellness: userPreferences.wellness,
+    urban: userPreferences.urban,
+    seclusion: userPreferences.seclusion,
 
     // Temperature
     temp_min: userPreferences.temperatureRange ? userPreferences.temperatureRange[0] : null,
@@ -132,10 +132,16 @@ async function generateRecommendations(userPreferences) {
     origin_lat: userPreferences.originLocation?.lat,
     origin_lon: userPreferences.originLocation?.lon,
 
+    // Photo Analysis
+    image_count: userPreferences.photoAnalysis?.imageCount, // Map userPreferences.photoAnalysis?.imageCount -> image_count
+    image_adjusted: userPreferences.photoAnalysis?.adjustmentSuccessful, // Map userPreferences.photoAnalysis?.adjustmentSuccessful -> photo_adjusted
+    image_analysis: userPreferences.photoAnalysis?.imageAnalysis, // Add mapping for imageAnalysis
+    image_summary: userPreferences.photoAnalysis?.imageSummary, // Add mapping for imageSummary
+
     // Other feedback/metadata
-    rated_destination_feedback: userPreferences.destinationRatings, // Map userPreferences.destinationRatings -> rated_destination_feedback
-    photo_count: userPreferences.photoAnalysis?.photoCount, // Map userPreferences.photoAnalysis?.photoCount -> photo_count
-    photo_adjusted: userPreferences.photoAnalysis?.adjustmentSuccessful, // Map userPreferences.photoAnalysis?.adjustmentSuccessful -> photo_adjusted
+    destination_ratings: userPreferences.destinationRatings, // Map userPreferences.destinationRatings -> rated_destination_feedback
+
+    // Conversation Summary
     user_message_count: userPreferences.conversationSummary?.userMessageCount, // Map userPreferences.conversationSummary?.userMessageCount -> user_message_count
 
     // Use IDs from the hardcoded detailed recommendations
