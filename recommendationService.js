@@ -23,13 +23,16 @@ const supabase = createClient(supabaseUrl, supabaseKey);
  * @returns {Promise<object>} - An object containing the DB record ID and detailed recommendations.
  */
 async function generateRecommendations(userPreferences) {
-  console.log("Received user preferences for recommendation:", JSON.stringify(userPreferences, null, 2));
+  console.log("Received user preferences for recommendation");
 
   // --- Fetch ALL Destinations from Supabase --- 
   console.log("Fetching all destinations from Supabase...");
   const { data: allDestinations, error: fetchError } = await supabase
     .from('destinations') // Make sure this table name is correct
-    .select('*');
+    .select(`
+      *,
+      images ( public_url )
+    `); // Fetch all destination columns and the public_url from the related images table
 
   if (fetchError) {
     console.error("Error fetching destinations:", fetchError);
@@ -55,7 +58,7 @@ async function generateRecommendations(userPreferences) {
   // The calculateRecommendations function returns the top 3 scored destinations
   // Each object in the array includes the destination id and calculated scores/percentage
   const topRecommendationsScored = calculateRecommendations(userPreferences, allDestinations);
-  console.log("Top 3 scored recommendations:", JSON.stringify(topRecommendationsScored, null, 2));
+  console.log("Top 3 scored recommendations successfully calculated");
 
   // --- Retrieve Full Details for Top Recommendations --- 
   // Create a map for quick lookup
@@ -64,15 +67,35 @@ async function generateRecommendations(userPreferences) {
   // Get the full destination objects for the top recommendations and add the match percentage
   const topRecommendationsDetailed = topRecommendationsScored.map(scoredRec => {
     const fullDetails = allDestinationsMap.get(scoredRec.id);
+    if (!fullDetails) {
+      console.warn(`Destination details not found for ID: ${scoredRec.id}`);
+      return null; // Handle case where ID might not be found
+    }
+
+    // Extract image URL
+    let imageUrl = null;
+    // Supabase returns related data as an array by default when using nested select
+    if (Array.isArray(fullDetails.images) && fullDetails.images.length > 0) {
+      imageUrl = fullDetails.images[0]?.public_url ?? null;
+    } else if (fullDetails.images && typeof fullDetails.images === 'object' && !Array.isArray(fullDetails.images)) {
+      // Fallback just in case it returns a single object (less common for one-to-many even with unique constraint)
+      imageUrl = fullDetails.images.public_url ?? null;
+    }
+
+    // Create a copy without the 'images' property to avoid redundancy in the final output
+    const detailsWithoutImages = { ...fullDetails };
+    delete detailsWithoutImages.images;
+
     return {
-      ...fullDetails, // Spread the original destination details
-      matchPercentage: scoredRec.matchPercentage, // Add the calculated match percentage
-      // Optionally add other scores from scoredRec if needed by the frontend
+      ...detailsWithoutImages,          // Spread destination details
+      image_url: imageUrl,             // Add the image URL
+      confidence: scoredRec.confidence, // Add the confidence score
+      // Add other scores if needed, e.g.:
       // contentScore: scoredRec.contentScore, 
-      // themeScore: scoredRec.themeScore,
-      // ...etc
+      // themeScore: scoredRec.themeScore, 
+      // ...etc.
     };
-  }).filter(rec => rec.id); // Filter out any potential nulls if fewer than 3 results somehow occurred
+  }).filter(rec => rec !== null); // Filter out any nulls introduced by missing details
 
   console.log(`Retrieved full details for ${topRecommendationsDetailed.length} recommendations.`);
 
@@ -117,21 +140,21 @@ async function generateRecommendations(userPreferences) {
     user_message_count: userPreferences.conversationSummary?.userMessageCount,
 
     // --- Top 3 Recommendations --- 
-    // Store IDs and Match Percentages (Assumes DB columns exist)
+    // Store IDs and Match Percentages (using existing *_confidence columns)
     destination_1_id: topRecommendationsDetailed[0]?.id ?? null,
-    destination_1_match_percentage: topRecommendationsDetailed[0]?.matchPercentage ?? null,
+    destination_1_confidence: topRecommendationsDetailed[0]?.confidence ?? null,
     destination_1_feedback: null, // Keep feedback null initially
 
     destination_2_id: topRecommendationsDetailed[1]?.id ?? null,
-    destination_2_match_percentage: topRecommendationsDetailed[1]?.matchPercentage ?? null,
+    destination_2_confidence: topRecommendationsDetailed[1]?.confidence ?? null,
     destination_2_feedback: null,
 
     destination_3_id: topRecommendationsDetailed[2]?.id ?? null,
-    destination_3_match_percentage: topRecommendationsDetailed[2]?.matchPercentage ?? null,
+    destination_3_confidence: topRecommendationsDetailed[2]?.confidence ?? null,
     destination_3_feedback: null,
   };
 
-  console.log("Attempting to insert into recommendations table:", JSON.stringify(recordToInsert, null, 2));
+  console.log("Attempting to insert into recommendations table");
 
   // --- Insert into Supabase 'recommendations' table --- 
   const { data: insertedData, error: insertError } = await supabase
