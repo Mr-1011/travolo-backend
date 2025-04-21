@@ -1,0 +1,63 @@
+{
+  "culture": 5,
+  "adventure": 5,
+  "nature": 4,
+  "beaches": 1,
+  "nightlife": 1,
+  "cuisine": 5,
+  "wellness": 1,
+  "urban": 1,
+  "seclusion": 2,
+  "temperatureRange": [
+    11,
+    34
+  ],
+  "travelMonths": [
+    "May",
+    "June",
+    "July"
+  ],
+  "travelDuration": [
+    "weekend",
+    "short"
+  ],
+  "preferredRegions": [
+    "asia",
+    "europe",
+    "middle_east"
+  ],
+  "originLocation": {
+    "name": "München, Bayern, Deutschland",
+    "lat": 48.1371079,
+    "lon": 11.5753822
+  },
+  "travelBudget": [
+    "budget",
+    "mid-range"
+  ],
+  "destinationRatings": {
+    "6b93d8e6-ab6a-4a5e-91f8-f42198c06d01": "like",
+    "aeb41503-ee2c-4678-aa67-33b816e31f68": "like",
+    "3c6506e6-c494-4622-aba3-2ba895530c7a": "dislike",
+    "f52d85c4-fee6-4b7b-a181-fa7b0c8adaa0": "dislike"
+  },
+  "photoAnalysis": {
+    "imageCount": 1,
+    "imageSummary": "Photo shows a winding mountain road and expansive alpine landscape, providing strong cues for nature and adventure, with a modest increase in seclusion due to the remote mountainous setting.",
+    "imageAnalysis": {
+      "culture": 0,
+      "adventure": 2,
+      "nature": 3,
+      "beaches": 0,
+      "nightlife": 0,
+      "cuisine": 0,
+      "wellness": 0,
+      "urban": 0,
+      "seclusion": 1
+    },
+    "adjustmentSuccessful": true
+  },
+  "conversationSummary": {
+    "userMessageCount": 0
+  }
+}
