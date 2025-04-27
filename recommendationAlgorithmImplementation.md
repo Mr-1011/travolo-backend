@@ -123,9 +123,9 @@ Create an exported function, e.g., `calculateRecommendations(userPreferences, al
     -   Find `maxHybridScore = Math.max(0, ...allScoredDestinations.map(d => d.hybridScore));` (Use 0 if array is empty or all scores are negative, although they shouldn't be).
     -   Sort `allScoredDestinations` descending by `hybridScore`.
     -   Take top 3: `top3Scored = allScoredDestinations.slice(0, 3);`
-    -   Format output: Map `top3Scored` to include `id`, `hybridScore`, and `matchPercentage`.
-        -   `matchPercentage = (maxHybridScore > 0) ? Math.round(100 * d.hybridScore / maxHybridScore) : 0;`
-    -   Return the formatted top 3 array, e.g., `[{ id: '...', hybridScore: 0.85, matchPercentage: 100 }, ...]`.
+    -   Format output: Map `top3Scored` to include `id`, `hybridScore`, and `confidence`.
+        -   `confidence = (maxHybridScore > 0) ? Math.round(100 * d.hybridScore / maxHybridScore) : 0;`
+    -   Return the formatted top 3 array, e.g., `[{ id: '...', hybridScore: 0.85, confidence: 100 }, ...]`.
 
 ## 5. Integration with `recommendationService.js`
 
@@ -136,9 +136,9 @@ Create an exported function, e.g., `calculateRecommendations(userPreferences, al
 -   Retrieve full details for the top 3 IDs from `allDestinations` using the IDs in `top3`.
 -   Map the `top3` results to the `recordToInsert` for the `recommendations` table. *Decision: Add `*_match_percentage` columns to the DB table.*
     -   `destination_1_id: top3[0]?.id || null,`
-    -   `destination_1_match_percentage: top3[0]?.matchPercentage || null,`
+    -   `destination_1_match_percentage: top3[0]?.confidence || null,`
     -   ... (similarly for 2 and 3)
--   Return the *full destination details* for the top 3, augmented with their `matchPercentage` and potentially other scores for explainability if desired by the frontend.
+-   Return the *full destination details* for the top 3, augmented with their `confidence` and potentially other scores for explainability if desired by the frontend.
 
 ## Decisions Summary:
 

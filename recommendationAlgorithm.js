@@ -139,6 +139,31 @@ function getMonthIndex(monthName) {
 // ==========================
 
 /**
+ * Calculates the element-wise average of an array of vectors.
+ * @param {number[][]} vectors - An array of vectors (arrays of numbers).
+ * @returns {number[]} The average vector, or null if input is empty or invalid.
+ */
+function averageVector(vectors) {
+  if (!vectors || vectors.length === 0 || !Array.isArray(vectors[0])) {
+    return null; // Or return a zero vector of appropriate length?
+  }
+  const numDimensions = vectors[0].length;
+  const sumVector = Array(numDimensions).fill(0);
+
+  for (const vector of vectors) {
+    if (vector.length !== numDimensions) {
+      console.warn("Skipping vector with mismatched dimensions in averageVector.");
+      continue; // Skip vectors with wrong dimensions
+    }
+    for (let i = 0; i < numDimensions; i++) {
+      sumVector[i] += vector[i] ?? 0; // Treat null/undefined as 0
+    }
+  }
+
+  return sumVector.map(sum => sum / vectors.length);
+}
+
+/**
  * Calculates a climate score based on a Gaussian (bell curve) distribution.
  * @param {number} avgTemp - The average temperature of the destination month.
  * @param {number} desiredMid - The midpoint of the user's desired temperature range.
@@ -197,6 +222,115 @@ function calculateRecommendations(userPreferences, allDestinations) {
   if (!userPreferences || !allDestinations || allDestinations.length === 0) {
     return [];
   }
+
+  // <<< START NEW CODE - Finding Liked/Disliked Destination Features >>>
+  console.log('--- Finding Liked/Disliked Destination Features ---');
+  const likedDestinationFeatures = [];
+  const dislikedDestinationFeatures = [];
+
+  if (userPreferences.destinationRatings && Object.keys(userPreferences.destinationRatings).length > 0) {
+    for (const [destId, rating] of Object.entries(userPreferences.destinationRatings)) {
+      const destination = allDestinations.find(d => d.id === destId);
+      if (destination) {
+        const features = [
+          destination.culture ?? 0,
+          destination.adventure ?? 0,
+          destination.nature ?? 0,
+          destination.beaches ?? 0,
+          destination.nightlife ?? 0,
+          destination.cuisine ?? 0,
+          destination.wellness ?? 0,
+          destination.urban ?? 0,
+          destination.seclusion ?? 0
+        ];
+        if (rating === 'like') {
+          console.log(`Liked Destination ID: ${destId}, Features: [${features.join(', ')}]`);
+          likedDestinationFeatures.push(features);
+        } else if (rating === 'dislike') {
+          console.log(`Disliked Destination ID: ${destId}, Features: [${features.join(', ')}]`);
+          dislikedDestinationFeatures.push(features);
+        }
+      } else {
+        console.log(`Warning: Destination ID ${destId} from ratings not found in allDestinations.`);
+      }
+    }
+  } else {
+    console.log('No destination ratings found in user preferences.');
+  }
+  console.log('--- Finished Finding Features ---');
+  // <<< END NEW CODE >>>
+
+  // <<< START NEW CODE - Calculate Average and Delta Vectors >>>
+  console.log('--- Calculating Feedback Adjustment Vectors ---');
+
+  // Use the helper function, default to zero vector if no likes/dislikes
+  const vec_like = averageVector(likedDestinationFeatures) || Array(9).fill(0);
+  const vec_dislike = averageVector(dislikedDestinationFeatures) || Array(9).fill(0);
+
+  // Calculate delta vector
+  const delta_vec = vec_like.map((likeVal, i) => likeVal - vec_dislike[i]);
+
+  console.log(`Average Liked Vector   (vec_like): [${vec_like.map(v => v.toFixed(3)).join(', ')}]`);
+  console.log(`Average Disliked Vector(vec_dislike): [${vec_dislike.map(v => v.toFixed(3)).join(', ')}]`);
+  console.log(`Delta Vector           (delta_vec): [${delta_vec.map(v => v.toFixed(3)).join(', ')}]`);
+
+  console.log('--- Finished Calculating Adjustment Vectors ---');
+  // <<< END NEW CODE >>>
+
+  // <<< START NEW CODE - Normalize Delta and Prepare Analysis Object >>>
+  console.log('--- Normalizing Delta and Preparing Analysis Object ---');
+
+  const normalizationThreshold = 0.5;
+  const normalizedAdjustments = delta_vec.map(delta => {
+    if (delta > normalizationThreshold) return 1;
+    if (delta < -normalizationThreshold) return -1;
+    return 0;
+  });
+
+  // Get the base user preferences vector BEFORE any adjustments (like photo analysis)
+  const baseUserVector = [
+    userPreferences.culture, userPreferences.adventure, userPreferences.nature,
+    userPreferences.beaches, userPreferences.nightlife, userPreferences.cuisine,
+    userPreferences.wellness, userPreferences.urban, userPreferences.seclusion
+  ].map(v => v ?? 0); // Use 0 as default if preference is missing
+
+  // Calculate the potential vector by applying normalized adjustments and clamping
+  const potentialAdjustedVector = baseUserVector.map((baseVal, i) => {
+    const adjusted = baseVal + normalizedAdjustments[i];
+    return Math.max(1, Math.min(5, adjusted)); // Clamp between 1 and 5
+  });
+
+  // Generate a simple summary (can be made more sophisticated)
+  const themeNames = ['Culture', 'Adventure', 'Nature', 'Beaches', 'Nightlife', 'Cuisine', 'Wellness', 'Urban', 'Seclusion'];
+  let summaryParts = [];
+  normalizedAdjustments.forEach((adj, i) => {
+    if (adj > 0) summaryParts.push(`increase ${themeNames[i]}`);
+    if (adj < 0) summaryParts.push(`decrease ${themeNames[i]}`);
+  });
+  const analysisSummary = summaryParts.length > 0
+    ? `Feedback analysis suggests: ${summaryParts.join(', ')}.`
+    : "Feedback analysis suggests no significant adjustments.";
+
+  // --- Create the simplified destination analysis object using NORMALIZED values --- 
+  const normalized_destination_analysis = {};
+  themeNames.forEach((name, index) => {
+    // Use lowercase theme name as key, use the normalized adjustment value (0, 1, or -1)
+    normalized_destination_analysis[name.toLowerCase()] = normalizedAdjustments[index];
+  });
+
+  // Directly add the analysis to the userPreferences object if ratings existed
+  if ((likedDestinationFeatures && likedDestinationFeatures.length > 0) || (dislikedDestinationFeatures && dislikedDestinationFeatures.length > 0)) {
+    userPreferences.destinationAnalysis = normalized_destination_analysis;
+    console.log('Normalized Destination Analysis Object added to userPreferences:');
+    console.log(JSON.stringify(normalized_destination_analysis, null, 2)); // Pretty print JSON
+  } else {
+    userPreferences.destinationAnalysis = null; // Ensure it's null if no analysis was done
+    console.log('No ratings found, setting userPreferences.destinationAnalysis to null.');
+  }
+
+  console.log('--- Finished Normalizing and Preparing Analysis ---');
+  // <<< END NEW CODE >>>
+
 
   // --- Prepare User Data ---
   const userThemeVector = [
@@ -409,7 +543,8 @@ function calculateRecommendations(userPreferences, allDestinations) {
       };
     });
 
-  return sortedDestinations;
+  // RETURN JUST the recommendations array
+  return sortedDestinations; // Return only the recommendations array
 }
 
 // Use CommonJS exports for Node.js
@@ -423,5 +558,6 @@ module.exports = {
   calculateMidpoint,
   getMonthIndex,
   gaussianClimateScore,
-  mapScoreToConfidence // Export the new helper
+  mapScoreToConfidence,
+  averageVector
 };

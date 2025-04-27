@@ -55,8 +55,8 @@ async function generateRecommendations(userPreferences) {
 
   // --- Calculate Recommendations using the Algorithm --- 
   console.log("Calculating recommendations...");
-  // The calculateRecommendations function returns the top 3 scored destinations
-  // Each object in the array includes the destination id and calculated scores/percentage
+  // The calculateRecommendations function now modifies userPreferences directly
+  // and returns only the recommendations array.
   const topRecommendationsScored = calculateRecommendations(userPreferences, allDestinations);
   console.log("Top 3 scored recommendations successfully calculated");
 
@@ -135,6 +135,7 @@ async function generateRecommendations(userPreferences) {
 
     // Other feedback/metadata
     destination_ratings: userPreferences.destinationRatings, // Renamed in DB? Assuming it maps to `destination_ratings`
+    destination_analysis: userPreferences.destinationAnalysis, // Access the analysis added by the algorithm
 
     // Conversation Summary
     user_message_count: userPreferences.conversationSummary?.userMessageCount,
