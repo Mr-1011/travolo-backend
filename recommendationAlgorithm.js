@@ -280,11 +280,15 @@ function calculateRecommendations(userPreferences, allDestinations) {
   // <<< START NEW CODE - Normalize Delta and Prepare Analysis Object >>>
   console.log('--- Normalizing Delta and Preparing Analysis Object ---');
 
-  const normalizationThreshold = 0.5;
+  // Apply the ceiling normalization based on user description
   const normalizedAdjustments = delta_vec.map(delta => {
-    if (delta > normalizationThreshold) return 1;
-    if (delta < -normalizationThreshold) return -1;
-    return 0;
+    if (delta === 0) {
+      return 0;
+    } else if (delta > 0) {
+      return Math.ceil(delta);
+    } else { // delta < 0
+      return -Math.ceil(Math.abs(delta));
+    }
   });
 
   // Get the base user preferences vector BEFORE any adjustments (like photo analysis)
@@ -300,7 +304,7 @@ function calculateRecommendations(userPreferences, allDestinations) {
     return Math.max(1, Math.min(5, adjusted)); // Clamp between 1 and 5
   });
 
-  // Generate a simple summary (can be made more sophisticated)
+  // Generate a simple summary
   const themeNames = ['Culture', 'Adventure', 'Nature', 'Beaches', 'Nightlife', 'Cuisine', 'Wellness', 'Urban', 'Seclusion'];
   let summaryParts = [];
   normalizedAdjustments.forEach((adj, i) => {
@@ -333,6 +337,31 @@ function calculateRecommendations(userPreferences, allDestinations) {
 
 
   // --- Prepare User Data ---
+  // REMOVED: Initial userThemeVector definition moved after adjustments
+
+  // --- Apply Destination Feedback Adjustments (if analysis exists) ---
+  if (userPreferences.destinationAnalysis) {
+    console.log("Applying destination feedback adjustments directly to userPreferences...");
+    const themeKeysInOrder = ['culture', 'adventure', 'nature', 'beaches', 'nightlife', 'cuisine', 'wellness', 'urban', 'seclusion'];
+    const originalVector = themeKeysInOrder.map(key => userPreferences[key] ?? 0);
+
+    themeKeysInOrder.forEach((themeKey, index) => {
+      const baseVal = userPreferences[themeKey] ?? 0;
+      const adjustment = userPreferences.destinationAnalysis[themeKey] ?? 0;
+      const adjusted = baseVal + adjustment;
+      // Clamp the adjusted value (assuming preference scale is 1-5) and update userPreferences
+      userPreferences[themeKey] = Math.max(1, Math.min(5, adjusted));
+    });
+
+    const updatedVector = themeKeysInOrder.map(key => userPreferences[key]);
+    console.log(`Original Preferences Vector: [${originalVector.join(', ')}]`);
+    console.log(`Updated Preferences Vector:  [${updatedVector.join(', ')}]`);
+  } else {
+    console.log("No destination feedback analysis found, using original user preferences.");
+  }
+  // --- End Adjustment ---
+
+  // --- Define User Data (Now uses potentially updated preferences) ---
   const userThemeVector = [
     userPreferences.culture,
     userPreferences.adventure,
@@ -343,7 +372,7 @@ function calculateRecommendations(userPreferences, allDestinations) {
     userPreferences.wellness,
     userPreferences.urban,
     userPreferences.seclusion
-  ].map(v => v ?? 0); // Default missing themes to 0
+  ].map(v => v ?? 0); // Read the potentially modified values
 
   const userTravelMonths = userPreferences.travelMonths?.map(m => m.toLowerCase()) || [];
   const userTravelBudgets = userPreferences.travelBudget?.map(b => b.toLowerCase()) || [];
@@ -368,6 +397,7 @@ function calculateRecommendations(userPreferences, allDestinations) {
     ].map(v => v ?? 0); // Also default missing themes to 0
 
     // 1. Theme Score
+    // Uses the userThemeVector which now reflects the adjusted preferences
     scores.themeScore = cosineSimilarity(userThemeVector, destThemeVector);
 
     // 2. Climate Score
