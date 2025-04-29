@@ -1,8 +1,7 @@
-/**
- * recommendationAlgorithm.js
- * 
- * Calculates destination recommendations based on user preferences and destination data.
- */
+// ====================
+// Imports & Dependencies
+// ====================
+const { calculateCollaborativeScores } = require('./collaborativeFiltering');
 
 // ====================
 // Helper Functions
@@ -134,10 +133,6 @@ function getMonthIndex(monthName) {
   return months[lowerCaseMonth] ?? null;
 }
 
-// ==========================
-// NEW HELPER FUNCTION
-// ==========================
-
 /**
  * Calculates the element-wise average of an array of vectors.
  * @param {number[][]} vectors - An array of vectors (arrays of numbers).
@@ -206,25 +201,20 @@ function mapScoreToConfidence(score) {
 // Main Recommendation Logic
 // ==========================
 
-// TODO: Implement calculateCollaborativeScores (V1 returns {})
-function calculateCollaborativeScores(userPreferences, allDestinations) {
-  // V1: No collaborative filtering yet
-  return {};
-}
-
 /**
  * Calculates recommendation scores for all destinations based on user preferences.
  * @param {object} userPreferences - The user's preference profile (e.g., from ExampleProfile.json).
  * @param {object[]} allDestinations - Array of all destination objects (e.g., from ExampleDestination.json structure).
+ * @param {object} itemSimilarityData - Pre-computed item-item similarities (e.g., loaded from itemSimilarity.json).
  * @returns {object[]} Array of scored destinations sorted by hybridScore, including id and confidence.
  */
-function calculateRecommendations(userPreferences, allDestinations) {
+function calculateRecommendations(userPreferences, allDestinations, itemSimilarityData) {
   if (!userPreferences || !allDestinations || allDestinations.length === 0) {
     return [];
   }
 
-  // <<< START NEW CODE - Finding Liked/Disliked Destination Features >>>
-  console.log('--- Finding Liked/Disliked Destination Features ---');
+  // --- Step 1: Process User Feedback (Destination Ratings) ---
+  console.log('--- Step 1: Processing User Feedback (Destination Ratings) ---');
   const likedDestinationFeatures = [];
   const dislikedDestinationFeatures = [];
 
@@ -257,11 +247,10 @@ function calculateRecommendations(userPreferences, allDestinations) {
   } else {
     console.log('No destination ratings found in user preferences.');
   }
-  console.log('--- Finished Finding Features ---');
-  // <<< END NEW CODE >>>
+  console.log('--- Finished Step 1 ---');
 
-  // <<< START NEW CODE - Calculate Average and Delta Vectors >>>
-  console.log('--- Calculating Feedback Adjustment Vectors ---');
+  // --- Step 2: Calculate Feedback Adjustment Vector ---
+  console.log('--- Step 2: Calculating Feedback Adjustment Vector ---');
 
   // Use the helper function, default to zero vector if no likes/dislikes
   const vec_like = averageVector(likedDestinationFeatures) || Array(9).fill(0);
@@ -274,11 +263,10 @@ function calculateRecommendations(userPreferences, allDestinations) {
   console.log(`Average Disliked Vector(vec_dislike): [${vec_dislike.map(v => v.toFixed(3)).join(', ')}]`);
   console.log(`Delta Vector           (delta_vec): [${delta_vec.map(v => v.toFixed(3)).join(', ')}]`);
 
-  console.log('--- Finished Calculating Adjustment Vectors ---');
-  // <<< END NEW CODE >>>
+  console.log('--- Finished Step 2 ---');
 
-  // <<< START NEW CODE - Normalize Delta and Prepare Analysis Object >>>
-  console.log('--- Normalizing Delta and Preparing Analysis Object ---');
+  // --- Step 3: Normalize Adjustments and Prepare Analysis Object ---
+  console.log('--- Step 3: Normalizing Adjustments and Preparing Analysis ---');
 
   // Apply the ceiling normalization based on user description
   const normalizedAdjustments = delta_vec.map(delta => {
@@ -332,14 +320,12 @@ function calculateRecommendations(userPreferences, allDestinations) {
     console.log('No ratings found, setting userPreferences.destinationAnalysis to null.');
   }
 
-  console.log('--- Finished Normalizing and Preparing Analysis ---');
-  // <<< END NEW CODE >>>
+  console.log('--- Finished Step 3 ---');
 
 
-  // --- Prepare User Data ---
-  // REMOVED: Initial userThemeVector definition moved after adjustments
-
-  // --- Apply Destination Feedback Adjustments (if analysis exists) ---
+  // --- Step 4: Apply Adjustments to User Preferences ---
+  console.log('--- Step 4: Applying Adjustments to User Preferences ---');
+  // Apply Destination Feedback Adjustments (if analysis exists)
   if (userPreferences.destinationAnalysis) {
     console.log("Applying destination feedback adjustments directly to userPreferences...");
     const themeKeysInOrder = ['culture', 'adventure', 'nature', 'beaches', 'nightlife', 'cuisine', 'wellness', 'urban', 'seclusion'];
@@ -359,9 +345,11 @@ function calculateRecommendations(userPreferences, allDestinations) {
   } else {
     console.log("No destination feedback analysis found, using original user preferences.");
   }
-  // --- End Adjustment ---
+  console.log('--- Finished Step 4 ---');
 
-  // --- Define User Data (Now uses potentially updated preferences) ---
+  // --- Step 5: Prepare User Data Vectors and Parameters ---
+  console.log('--- Step 5: Preparing User Data ---');
+  // Define User Data (Now uses potentially updated preferences)
   const userThemeVector = [
     userPreferences.culture,
     userPreferences.adventure,
@@ -382,14 +370,20 @@ function calculateRecommendations(userPreferences, allDestinations) {
   const hasOrigin = userPreferences.originLocation?.lat != null && userPreferences.originLocation?.lon != null;
   const hasRatings = userPreferences.destinationRatings && Object.keys(userPreferences.destinationRatings).length > 0;
 
-  // --- Calculate Collaborative Scores (V1 returns {}) ---
-  const collabScores = calculateCollaborativeScores(userPreferences, allDestinations);
+  console.log('--- Finished Step 5 ---');
 
-  // --- Score Each Destination ---
+  // --- Step 6: Calculate Collaborative Scores (Using Imported Function) ---
+  console.log('--- Step 6: Calculating Collaborative Scores ---');
+  const collabScores = calculateCollaborativeScores(userPreferences, allDestinations, itemSimilarityData);
+  console.log('--- Finished Step 6 ---');
+
+  // --- Step 7: Score Each Destination (Content-Based) ---
+  console.log('--- Step 7: Scoring Each Destination (Content-Based) ---');
   const allScoredDestinations = allDestinations.map(d => {
+    // Initialize scores object for the current destination
     const scores = {
       id: d.id,
-      // Initialize scores
+      // Scores will be added below
     };
     const destThemeVector = [
       d.culture, d.adventure, d.nature, d.beaches,
@@ -536,10 +530,12 @@ function calculateRecommendations(userPreferences, allDestinations) {
     scores.hybridScore = contentWeight * scores.contentScore + collabWeight * scores.collabScore;
 
 
-    return scores;
+    return scores; // Return the complete scores object for this destination
   });
+  console.log('--- Finished Step 7 ---');
 
-  // --- Post-Processing: Rank and Map to Confidence ---
+  // --- Step 8: Post-Processing - Rank, Map Confidence, and Format Output ---
+  console.log('--- Step 8: Post-Processing Results ---');
   // Sort by hybrid score first
   const sortedDestinations = allScoredDestinations
     .sort((a, b) => (b.hybridScore ?? 0) - (a.hybridScore ?? 0)) // Handle potential undefined/null scores
@@ -573,10 +569,14 @@ function calculateRecommendations(userPreferences, allDestinations) {
       };
     });
 
+  console.log('--- Finished Step 8 ---');
   // RETURN JUST the recommendations array
   return sortedDestinations; // Return only the recommendations array
 }
 
+// ==========================
+// Exports
+// ==========================
 // Use CommonJS exports for Node.js
 module.exports = {
   calculateRecommendations,
