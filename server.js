@@ -4,7 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
 const multer = require('multer'); // Import multer
 const { analyzeImagesWithOpenAI } = require('./openaiService'); // Import the new service
-const { generateRecommendations } = require('./recommendationService'); // Import the new recommendation service
+const { generateRecommendations } = require('./services/recommendationService'); // Import the new recommendation service
 const { handleChatInteraction } = require('./chatService'); // Import the new chat service
 
 const app = express();

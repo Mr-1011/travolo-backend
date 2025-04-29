@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
-const { calculateRecommendations } = require('./recommendationAlgorithm'); // Import the algorithm
+const { calculateRecommendations } = require('../recommendationAlgorithm'); // Import the algorithm
 
 // Ensure Supabase connection details are available
 const supabaseUrl = process.env.SUPABASE_URL;

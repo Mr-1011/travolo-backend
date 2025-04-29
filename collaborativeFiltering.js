@@ -1,10 +1,4 @@
 /**
- * collaborativeFiltering.js
- *
- * Implements item-based collaborative filtering scoring.
- */
-
-/**
  * Calculates collaborative filtering scores for destinations based on user likes and item similarities.
  *
  * @param {object} userPreferences - The user's preference profile, including destinationRatings.

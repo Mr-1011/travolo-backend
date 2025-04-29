@@ -2,6 +2,7 @@
 // Imports & Dependencies
 // ====================
 const { calculateCollaborativeScores } = require('./collaborativeFiltering');
+const { calculateContentScores } = require('./contentFiltering');
 
 // ====================
 // Helper Functions
@@ -303,7 +304,7 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
     ? `Feedback analysis suggests: ${summaryParts.join(', ')}.`
     : "Feedback analysis suggests no significant adjustments.";
 
-  // --- Create the simplified destination analysis object using NORMALIZED values --- 
+  // --- Create the simplified destination analysis object using NORMALIZED values ---
   const normalized_destination_analysis = {};
   themeNames.forEach((name, index) => {
     // Use lowercase theme name as key, use the normalized adjustment value (0, 1, or -1)
@@ -349,7 +350,7 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
 
   // --- Step 5: Prepare User Data Vectors and Parameters ---
   console.log('--- Step 5: Preparing User Data ---');
-  // Define User Data (Now uses potentially updated preferences)
+  // Define User Theme Vector (Now uses potentially updated preferences)
   const userThemeVector = [
     userPreferences.culture,
     userPreferences.adventure,
@@ -362,12 +363,7 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
     userPreferences.seclusion
   ].map(v => v ?? 0); // Read the potentially modified values
 
-  const userTravelMonths = userPreferences.travelMonths?.map(m => m.toLowerCase()) || [];
-  const userTravelBudgets = userPreferences.travelBudget?.map(b => b.toLowerCase()) || [];
-  const userPreferredRegions = userPreferences.preferredRegions?.map(r => r.toLowerCase()) || [];
-  // Normalize user durations to match the keys used in mapDurationToDays and destination data normalization
-  const userTravelDurations = userPreferences.travelDuration?.map(d => d.toLowerCase().replace(' ', '-')) || [];
-  const hasOrigin = userPreferences.originLocation?.lat != null && userPreferences.originLocation?.lon != null;
+  // Other user preferences needed for scoring functions are accessed directly or passed
   const hasRatings = userPreferences.destinationRatings && Object.keys(userPreferences.destinationRatings).length > 0;
 
   console.log('--- Finished Step 5 ---');
@@ -377,170 +373,43 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
   const collabScores = calculateCollaborativeScores(userPreferences, allDestinations, itemSimilarityData);
   console.log('--- Finished Step 6 ---');
 
-  // --- Step 7: Score Each Destination (Content-Based) ---
-  console.log('--- Step 7: Scoring Each Destination (Content-Based) ---');
-  const allScoredDestinations = allDestinations.map(d => {
-    // Initialize scores object for the current destination
-    const scores = {
-      id: d.id,
-      // Scores will be added below
-    };
-    const destThemeVector = [
-      d.culture, d.adventure, d.nature, d.beaches,
-      d.nightlife, d.cuisine, d.wellness, d.urban, d.seclusion
-    ].map(v => v ?? 0); // Also default missing themes to 0
-
-    // 1. Theme Score
-    // Uses the userThemeVector which now reflects the adjusted preferences
-    scores.themeScore = cosineSimilarity(userThemeVector, destThemeVector);
-
-    // 2. Climate Score
-    if (userTravelMonths.length > 0 && userPreferences.temperatureRange) {
-      const monthlyClimateScores = [];
-      const userMidTemp = calculateMidpoint(userPreferences.temperatureRange);
-
-      // Only proceed if userMidTemp is valid
-      if (userMidTemp !== null) {
-        userTravelMonths.forEach(monthName => {
-          const monthIndex = getMonthIndex(monthName);
-          if (monthIndex) {
-            const avgTemp = getAverageTemperature(d, monthIndex);
-            if (avgTemp !== null) {
-              const scoreForMonth = gaussianClimateScore(avgTemp, userMidTemp, 5);
-              monthlyClimateScores.push(scoreForMonth);
-            }
-          }
-        });
-        if (monthlyClimateScores.length > 0) {
-          scores.climateScore = monthlyClimateScores.reduce((a, b) => a + b, 0) / monthlyClimateScores.length;
-        } else {
-          // If no valid monthly temps found for the selected months, maybe assign a default score or omit?
-          // Omitting means weight gets redistributed. Assigning 0 might be too harsh. Let's omit for now.
-        }
-      }
-    }
-
-    // 3. Budget Score
-    if (userTravelBudgets.length > 0) {
-      const userLevels = userTravelBudgets.map(mapBudgetToNumber).filter(n => n !== null);
-      const destLevelNum = mapBudgetToNumber(d.budget_level);
-
-      if (userLevels.length > 0 && destLevelNum !== null) {
-        if (userLevels.includes(destLevelNum)) {
-          scores.budgetScore = 1;
-        } else {
-          // Penalize based on minimum distance between user's preferred levels and destination level
-          const minDistance = Math.min(...userLevels.map(u => Math.abs(u - destLevelNum)));
-          // Score decreases by 0.5 for each level difference (max diff 2 -> score 0)
-          scores.budgetScore = Math.max(0, 1 - 0.5 * minDistance);
-        }
-      }
-    }
-
-    // 4. Region Score
-    if (userPreferredRegions.length > 0 && d.region) {
-      const regionMatch = userPreferredRegions.includes(d.region.toLowerCase());
-      // Strong score for match, moderate penalty for mismatch if user specified regions
-      scores.regionScore = regionMatch ? 1 : 0.3;
-    } else if (d.region) {
-      // If user has no region preference, this score component doesn't apply / is neutral.
-      // It won't be added to the weighted sum later.
-    }
-
-
-    // 5a. Duration Match Score
-    // Normalize destination durations similarly to user durations
-    const destIdealDurations = d.ideal_durations?.map(dur => dur.toLowerCase().replace(' ', '-')) || [];
-    if (userTravelDurations.length > 0) {
-      if (destIdealDurations.length > 0) {
-        const userDurationsSet = new Set(userTravelDurations);
-        const intersection = destIdealDurations.filter(dur => userDurationsSet.has(dur));
-        // Score is 1 if there's any overlap, 0.5 if no overlap but both have data
-        scores.durationMatchScore = intersection.length > 0 ? 1 : 0.5;
-      } else {
-        // Destination has no ideal duration data, give a neutral score?
-        scores.durationMatchScore = 0.7;
-      }
-    } else if (destIdealDurations.length > 0) {
-      // User didn't specify duration, destination has data. Neutral score.
-      scores.durationMatchScore = 0.8;
-    } // If neither has data, score is omitted.
-
-
-    // 5b. Distance Score (with duration penalty)
-    if (hasOrigin && d.latitude != null && d.longitude != null) {
-      const km = haversineDistance(
-        { lat: userPreferences.originLocation.lat, lon: userPreferences.originLocation.lon },
-        { lat: d.latitude, lon: d.longitude }
-      );
-
-      // Base score: decays with distance. 1/(1 + (km/scale)^2). Scale=2000km -> 0.5 score at 2000km.
-      let baseDistanceScore = 1 / (1 + Math.pow(km / 2000, 2));
-      let penaltyMultiplier = 1;
-
-      // Apply penalty only if user specified durations
-      if (userTravelDurations.length > 0) {
-        const userDays = userTravelDurations.map(mapDurationToDays).filter(days => days !== null);
-        if (userDays.length > 0) {
-          const minUserDays = Math.min(...userDays);
-
-          // Define thresholds based on mapped days (adjust as needed)
-          const thresholds = {
-            1: 500,    // Day trip max km
-            2: 1500,   // Weekend max km
-            4: 3000,   // Short trip max km
-            7: 6000,   // One week max km
-            10: 15000, // Long trip max km (using 10 from mapDurationToDays)
-          };
-          const relevantThreshold = thresholds[minUserDays] ?? thresholds[10];
-
-          if (km > relevantThreshold && relevantThreshold > 0) {
-            // Penalty: score reduces proportionally to how much threshold is exceeded.
-            // Multiplier is clamped between 0.1 and 1.
-            penaltyMultiplier = Math.max(0.1, relevantThreshold / km); // e.g., km=2*threshold -> multiplier=0.5
-          }
-        }
-      }
-      scores.distanceScore = baseDistanceScore * penaltyMultiplier;
-    }
-
-    // 6. Content Blend
-    const weights = { theme: 0.35, climate: 0.20, budget: 0.10, region: 0.20, durationMatch: 0.10, distance: 0.05 };
-    let weightedSum = 0;
-    let weightSum = 0;
-
-    for (const key in weights) {
-      const scoreKey = `${key}Score`;
-      // Check score exists and is a valid number before including in weighted average
-      if (scores[scoreKey] !== undefined && scores[scoreKey] !== null && typeof scores[scoreKey] === 'number' && !isNaN(scores[scoreKey])) {
-        weightedSum += weights[key] * scores[scoreKey];
-        weightSum += weights[key];
-      }
-    }
-    // Normalize the score based on the weights of the factors that were actually present
-    scores.contentScore = (weightSum > 0) ? weightedSum / weightSum : 0;
-
-
-    // 7. Collaborative Score
-    scores.collabScore = collabScores[d.id] ?? 0; // Default to 0 if no collab score
-
-    // 8. Hybrid Score
-    const contentWeight = hasRatings ? 0.7 : 1.0; // More weight on content if no ratings exist
-    const collabWeight = hasRatings ? 0.3 : 0.0; // Collab only counts if ratings exist
-    scores.hybridScore = contentWeight * scores.contentScore + collabWeight * scores.collabScore;
-
-
-    return scores; // Return the complete scores object for this destination
-  });
+  // --- Step 7: Calculate Content Scores (Using Imported Function) ---
+  console.log('--- Step 7: Calculating Content Scores ---');
+  // This now calls the function from contentFiltering.js
+  const contentScoresMap = calculateContentScores(userPreferences, allDestinations, userThemeVector);
   console.log('--- Finished Step 7 ---');
 
-  // --- Step 8: Post-Processing - Rank, Map Confidence, and Format Output ---
-  console.log('--- Step 8: Post-Processing Results ---');
-  // Sort by hybrid score first
-  const sortedDestinations = allScoredDestinations
+
+  // --- Step 8: Combine Scores, Post-Process, Rank, Map Confidence ---
+  console.log('--- Step 8: Combining Scores and Post-Processing Results ---');
+
+  // Combine content and collaborative scores, calculate hybrid score
+  const combinedScores = allDestinations.map(d => {
+    const destId = d.id;
+    const contentData = contentScoresMap[destId] ?? {}; // Get content scores for this ID
+    const collabScore = collabScores[destId] ?? 0;     // Get collab score for this ID
+
+    const contentScore = contentData.contentScore ?? 0; // Default to 0 if no content score
+
+    // Calculate Hybrid Score
+    const contentWeight = hasRatings ? 0.7 : 1.0;
+    const collabWeight = hasRatings ? 0.3 : 0.0;
+    const hybridScore = contentWeight * contentScore + collabWeight * collabScore;
+
+    // Return a combined object with all scores for sorting and logging
+    return {
+      ...contentData, // Includes id, themeScore, climateScore, etc., contentScore
+      collabScore: collabScore,
+      hybridScore: hybridScore
+    };
+  });
+
+
+  // Sort by hybrid score first, then take top N, map confidence
+  const sortedDestinations = combinedScores
     .sort((a, b) => (b.hybridScore ?? 0) - (a.hybridScore ?? 0)) // Handle potential undefined/null scores
     .slice(0, 3) // Take top 3
-    .map((d, index) => { // Add index for logging rank
+    .map((d, index) => { // Add index for logging rank and map confidence
       const confidence = mapScoreToConfidence(d.hybridScore);
 
       // <<< START DEBUG LOGGING >>>
@@ -561,8 +430,6 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
       // <<< END DEBUG LOGGING >>>
 
       // Return the original expected structure (id and calculated confidence)
-      // If your service expects the full score object 'd', return that instead.
-      // Assuming it expects { id: ..., confidence: ... }
       return {
         id: d.id,
         confidence: confidence
@@ -580,14 +447,6 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
 // Use CommonJS exports for Node.js
 module.exports = {
   calculateRecommendations,
-  cosineSimilarity,
-  haversineDistance,
-  mapBudgetToNumber,
-  mapDurationToDays,
-  getAverageTemperature,
-  calculateMidpoint,
-  getMonthIndex,
-  gaussianClimateScore,
   mapScoreToConfidence,
   averageVector
 };
