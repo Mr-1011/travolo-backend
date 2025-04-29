@@ -277,5 +277,4 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
 // ==========================
 module.exports = {
   calculateContentScores,
-  // We don't need to export the helpers if they are only used internally here
 }; 

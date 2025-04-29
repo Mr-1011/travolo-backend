@@ -206,10 +206,10 @@ function mapScoreToConfidence(score) {
  * Calculates recommendation scores for all destinations based on user preferences.
  * @param {object} userPreferences - The user's preference profile (e.g., from ExampleProfile.json).
  * @param {object[]} allDestinations - Array of all destination objects (e.g., from ExampleDestination.json structure).
- * @param {object} itemSimilarityData - Pre-computed item-item similarities (e.g., loaded from itemSimilarity.json).
  * @returns {object[]} Array of scored destinations sorted by hybridScore, including id and confidence.
  */
-function calculateRecommendations(userPreferences, allDestinations, itemSimilarityData) {
+// Make the function synchronous again
+function calculateRecommendations(userPreferences, allDestinations) {
   if (!userPreferences || !allDestinations || allDestinations.length === 0) {
     return [];
   }
@@ -370,7 +370,8 @@ function calculateRecommendations(userPreferences, allDestinations, itemSimilari
 
   // --- Step 6: Calculate Collaborative Scores (Using Imported Function) ---
   console.log('--- Step 6: Calculating Collaborative Scores ---');
-  const collabScores = calculateCollaborativeScores(userPreferences, allDestinations, itemSimilarityData);
+  // Remove the itemSimilarityData parameter from the call
+  const collabScores = calculateCollaborativeScores(userPreferences, allDestinations);
   console.log('--- Finished Step 6 ---');
 
   // --- Step 7: Calculate Content Scores (Using Imported Function) ---

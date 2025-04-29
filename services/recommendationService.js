@@ -1,14 +1,20 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const { calculateRecommendations } = require('../recommendationAlgorithm'); // Import the algorithm
+const { invalidateSimilarityCache } = require('../collaborativeFiltering'); // Adjust path if necessary
 
 // Ensure Supabase connection details are available
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // <-- Add service role key
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("Supabase URL or Key not found in .env file.");
+  console.error("Supabase URL or Public Key not found in .env file.");
   process.exit(1); // Exit if Supabase connection isn't possible
+}
+
+if (!supabaseServiceRoleKey) {
+  console.warn("Supabase Service Role Key not found in .env file. Similarity matrix refresh will fail.");
 }
 
 /** @type {import('@supabase/supabase-js').SupabaseClient} */
@@ -137,9 +143,6 @@ async function generateRecommendations(userPreferences) {
     destination_ratings: userPreferences.destinationRatings, // Renamed in DB? Assuming it maps to `destination_ratings`
     destination_analysis: userPreferences.destinationAnalysis, // Access the analysis added by the algorithm
 
-    // Conversation Summary
-    user_message_count: userPreferences.conversationSummary?.userMessageCount,
-
     // --- Top 3 Recommendations --- 
     // Store IDs and Match Percentages (using existing *_confidence columns)
     destination_1_id: topRecommendationsDetailed[0]?.id ?? null,
@@ -177,6 +180,25 @@ async function generateRecommendations(userPreferences) {
 
   const newRecordId = insertedData ? insertedData.id : null;
   console.log("Successfully inserted recommendation record with ID:", newRecordId);
+
+  // --- Refresh Item Similarity Matrix ---
+  if (newRecordId && supabaseServiceRoleKey) {
+    console.log("Attempting to refresh item similarity matrix...");
+    // Create a separate client instance with the Service Role Key for the RPC call
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const { error: rpcError } = await supabaseAdmin.rpc('refresh_item_similarity'); // k defaults to 30
+
+    if (rpcError) {
+      console.error("Error calling refresh_item_similarity RPC:", rpcError);
+      // Decide how to handle this error - maybe log it but don't fail the request?
+    } else {
+      console.log("Successfully triggered refresh_item_similarity. Invalidating cache.");
+      // Call the imported invalidation function
+      invalidateSimilarityCache();
+    }
+  } else if (!supabaseServiceRoleKey) {
+    console.warn("Skipping item similarity refresh because SUPABASE_SERVICE_ROLE_KEY is missing.");
+  }
 
   // --- Return the ID of the saved record and the ACTUAL recommendations --- 
   return {
