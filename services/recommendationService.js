@@ -63,7 +63,7 @@ async function generateRecommendations(userPreferences) {
   console.log("Calculating recommendations...");
   // The calculateRecommendations function now modifies userPreferences directly
   // and returns only the recommendations array.
-  const topRecommendationsScored = calculateRecommendations(userPreferences, allDestinations);
+  const topRecommendationsScored = await calculateRecommendations(userPreferences, allDestinations);
   console.log("Top 3 scored recommendations successfully calculated");
 
   // --- Retrieve Full Details for Top Recommendations --- 
