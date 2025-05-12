@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Recommendation Service for Travolo
+ * 
+ * This service handles the recommendation generation logic:
+ * 1. Receives user preferences from the frontend
+ * 2. Fetches destinations from the database
+ * 3. Calls the recommendation algorithm to generate personalized recommendations
+ * 4. Stores the user preferences and recommendations in the database
+ * 5. Returns detailed recommendation information to the frontend
+ * 6. Triggers the similarity matrix refresh when appropriate
+ */
+
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const { calculateRecommendations } = require('../recommendationAlgorithm'); // Import the algorithm
@@ -31,14 +43,14 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 async function generateRecommendations(userPreferences) {
   console.log("Received user preferences for recommendation");
 
-  // --- Fetch ALL Destinations from Supabase --- 
+  // --- Step 1: Fetch destinations from database --- 
   console.log("Fetching all destinations from Supabase...");
   const { data: allDestinations, error: fetchError } = await supabase
-    .from('destinations') // Make sure this table name is correct
+    .from('destinations')
     .select(`
       *,
       images ( public_url )
-    `); // Fetch all destination columns and the public_url from the related images table
+    `);
 
   if (fetchError) {
     console.error("Error fetching destinations:", fetchError);
@@ -59,15 +71,15 @@ async function generateRecommendations(userPreferences) {
   }
   console.log(`Fetched ${allDestinations.length} destinations.`);
 
-  // --- Calculate Recommendations using the Algorithm --- 
+  // --- Step 2: Calculate recommendations using the algorithm --- 
   console.log("Calculating recommendations...");
-  // The calculateRecommendations function now modifies userPreferences directly
-  // and returns only the recommendations array.
+  // The calculateRecommendations function modifies userPreferences directly
+  // and returns an array of recommendations with id and confidence.
   const topRecommendationsScored = await calculateRecommendations(userPreferences, allDestinations);
   console.log("Top 3 scored recommendations successfully calculated");
 
-  // --- Retrieve Full Details for Top Recommendations --- 
-  // Create a map for quick lookup
+  // --- Step 3: Retrieve full destination details for top recommendations --- 
+  // Create a map for quick lookup of destination details
   const allDestinationsMap = new Map(allDestinations.map(d => [d.id, d]));
 
   // Get the full destination objects for the top recommendations and add the match percentage
@@ -78,34 +90,31 @@ async function generateRecommendations(userPreferences) {
       return null; // Handle case where ID might not be found
     }
 
-    // Extract image URL
+    // Extract image URL from the nested images relation
     let imageUrl = null;
     // Supabase returns related data as an array by default when using nested select
     if (Array.isArray(fullDetails.images) && fullDetails.images.length > 0) {
       imageUrl = fullDetails.images[0]?.public_url ?? null;
     } else if (fullDetails.images && typeof fullDetails.images === 'object' && !Array.isArray(fullDetails.images)) {
-      // Fallback just in case it returns a single object (less common for one-to-many even with unique constraint)
+      // Fallback just in case it returns a single object
       imageUrl = fullDetails.images.public_url ?? null;
     }
 
-    // Create a copy without the 'images' property to avoid redundancy in the final output
+    // Create a copy without the 'images' property to avoid redundancy in output
     const detailsWithoutImages = { ...fullDetails };
     delete detailsWithoutImages.images;
 
     return {
       ...detailsWithoutImages,          // Spread destination details
-      image_url: imageUrl,             // Add the image URL
+      image_url: imageUrl,              // Add the image URL
       confidence: scoredRec.confidence, // Add the confidence score
-      // Add other scores if needed, e.g.:
-      // contentScore: scoredRec.contentScore, 
-      // themeScore: scoredRec.themeScore, 
-      // ...etc.
     };
   }).filter(rec => rec !== null); // Filter out any nulls introduced by missing details
 
   console.log(`Retrieved full details for ${topRecommendationsDetailed.length} recommendations.`);
 
-  // --- Prepare Record for Supabase 'recommendations' Table --- 
+  // --- Step 4: Prepare record for database storage --- 
+  // Map user preferences to database schema
   const recordToInsert = {
     // Travel Themes (Map from userPreferences)
     culture: userPreferences.culture,
@@ -140,11 +149,10 @@ async function generateRecommendations(userPreferences) {
     image_summary: userPreferences.photoAnalysis?.imageSummary,
 
     // Other feedback/metadata
-    destination_ratings: userPreferences.destinationRatings, // Renamed in DB? Assuming it maps to `destination_ratings`
-    destination_analysis: userPreferences.destinationAnalysis, // Access the analysis added by the algorithm
+    destination_ratings: userPreferences.destinationRatings,
+    destination_analysis: userPreferences.destinationAnalysis, // Analysis added by the algorithm
 
-    // --- Top 3 Recommendations --- 
-    // Store IDs and Match Percentages (using existing *_confidence columns)
+    // Top 3 Recommendations - Store IDs and Match Percentages
     destination_1_id: topRecommendationsDetailed[0]?.id ?? null,
     destination_1_confidence: topRecommendationsDetailed[0]?.confidence ?? null,
     destination_1_feedback: null, // Keep feedback null initially
@@ -160,9 +168,9 @@ async function generateRecommendations(userPreferences) {
 
   console.log("Attempting to insert into recommendations table");
 
-  // --- Insert into Supabase 'recommendations' table --- 
+  // --- Step 5: Save recommendation record to database --- 
   const { data: insertedData, error: insertError } = await supabase
-    .from('recommendations') // Make sure this table name is correct
+    .from('recommendations')
     .insert([recordToInsert])
     .select('id') // Select only the id of the newly inserted row
     .single(); // Expecting a single row back
@@ -181,30 +189,30 @@ async function generateRecommendations(userPreferences) {
   const newRecordId = insertedData ? insertedData.id : null;
   console.log("Successfully inserted recommendation record with ID:", newRecordId);
 
-  // --- Refresh Item Similarity Matrix ---
+  // --- Step 6: Refresh Item Similarity Matrix for collaborative filtering ---
   if (newRecordId && supabaseServiceRoleKey) {
     console.log("Attempting to refresh item similarity matrix...");
     // Create a separate client instance with the Service Role Key for the RPC call
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
-    const { error: rpcError } = await supabaseAdmin.rpc('refresh_item_similarity'); // k defaults to 30
+    const { error: rpcError } = await supabaseAdmin.rpc('refresh_item_similarity');
 
     if (rpcError) {
       console.error("Error calling refresh_item_similarity RPC:", rpcError);
-      // Decide how to handle this error - maybe log it but don't fail the request?
+      // Log error but don't fail the request
     } else {
       console.log("Successfully triggered refresh_item_similarity. Invalidating cache.");
-      // Call the imported invalidation function
+      // Invalidate the cache so next request will fetch fresh data
       invalidateSimilarityCache();
     }
   } else if (!supabaseServiceRoleKey) {
     console.warn("Skipping item similarity refresh because SUPABASE_SERVICE_ROLE_KEY is missing.");
   }
 
-  // --- Return the ID of the saved record and the ACTUAL recommendations --- 
+  // --- Step 7: Return results to frontend --- 
   return {
     message: "Recommendations generated and saved successfully.",
     recommendationRecordId: newRecordId, // ID of the row created in the DB
-    recommendations: topRecommendationsDetailed // Return the detailed actual recommendations
+    recommendations: topRecommendationsDetailed // Return the detailed recommendations
   };
 }
 

@@ -1,3 +1,15 @@
+/**
+ * @fileoverview Main recommendation algorithm implementation for Travolo 
+ * 
+ * This file contains the core logic for generating destination recommendations based on:
+ * 1. User preferences (travel themes, climate, budget, etc.)
+ * 2. User feedback on previously viewed destinations
+ * 3. Hybrid filtering (combining content-based and collaborative filtering)
+ * 
+ * The algorithm adjusts user preferences based on feedback and generates
+ * ranked destination recommendations with confidence scores.
+ */
+
 // ====================
 // Imports & Dependencies
 // ====================
@@ -7,117 +19,6 @@ const { calculateContentScores } = require('./contentFiltering');
 // ====================
 // Helper Functions
 // ====================
-
-/**
- * Calculates the cosine similarity between two vectors.
- * @param {number[]} vecA - The first vector.
- * @param {number[]} vecB - The second vector.
- * @returns {number} The cosine similarity (0 to 1), or 0 if either vector is zero or dimensions mismatch.
- */
-function cosineSimilarity(vecA, vecB) {
-  if (!vecA || !vecB || vecA.length !== vecB.length) {
-    return 0;
-  }
-
-  let dotProduct = 0;
-  let magnitudeA = 0;
-  let magnitudeB = 0;
-
-  for (let i = 0; i < vecA.length; i++) {
-    const valA = vecA[i] ?? 0; // Default null/undefined to 0
-    const valB = vecB[i] ?? 0; // Default null/undefined to 0
-    dotProduct += valA * valB;
-    magnitudeA += valA * valA;
-    magnitudeB += valB * valB;
-  }
-
-  magnitudeA = Math.sqrt(magnitudeA);
-  magnitudeB = Math.sqrt(magnitudeB);
-
-  if (magnitudeA === 0 || magnitudeB === 0) {
-    return 0; // Prevent division by zero
-  }
-
-  return dotProduct / (magnitudeA * magnitudeB);
-}
-
-/**
- * Calculates the Haversine distance between two points on the Earth.
- * @param {{lat: number, lon: number}} coords1 - First coordinates.
- * @param {{lat: number, lon: number}} coords2 - Second coordinates.
- * @returns {number} The distance in kilometers.
- */
-function haversineDistance(coords1, coords2) {
-  const R = 6371; // Radius of the Earth in kilometers
-  const dLat = (coords2.lat - coords1.lat) * Math.PI / 180;
-  const dLon = (coords2.lon - coords1.lon) * Math.PI / 180;
-  const lat1 = coords1.lat * Math.PI / 180;
-  const lat2 = coords2.lat * Math.PI / 180;
-
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-/**
- * Maps budget level strings to numerical values.
- * @param {string} budgetString - The budget level ('Budget', 'Mid-range', 'Luxury').
- * @returns {number | null} The numerical value (1, 2, 3) or null if no match.
- */
-function mapBudgetToNumber(budgetString) {
-  if (!budgetString) return null;
-  const lowerCaseBudget = budgetString.toLowerCase();
-  if (lowerCaseBudget === 'budget') return 1;
-  if (lowerCaseBudget === 'mid-range') return 2;
-  if (lowerCaseBudget === 'luxury') return 3;
-  return null;
-}
-
-/**
- * Maps duration labels (from UI) to approximate number of days for threshold calculation.
- * @param {string} durationLabel - The duration label ('Day trip', 'Weekend', etc.).
- * @returns {number | null} The approximate number of days or null if no match.
- */
-function mapDurationToDays(durationLabel) {
-  if (!durationLabel) return null;
-  // Normalize to handle variations like 'Day trip' vs 'day-trip' and case
-  const lowerCaseDuration = durationLabel.toLowerCase().replace(' ', '-');
-  if (lowerCaseDuration === 'day-trip') return 1;
-  if (lowerCaseDuration === 'weekend') return 2; // Using 2 days for weekend threshold
-  if (lowerCaseDuration === 'short-trip') return 4; // Using 4 days for short trip threshold
-  if (lowerCaseDuration === 'one-week') return 7; // Using 7 days for one week threshold
-  if (lowerCaseDuration === 'long-trip') return 10; // Using 10 days as the start for long trip threshold
-  return null;
-}
-
-/**
- * Safely gets the average temperature for a given month from destination data.
- * @param {object} destination - The destination object.
- * @param {number} monthIndex - The 1-based month index (1-12).
- * @returns {number | null} The average temperature or null if not found.
- */
-function getAverageTemperature(destination, monthIndex) {
-  // Ensure monthIndex is treated as a string key if avg_temp_monthly keys are strings '1', '2', etc.
-  // Or ensure avg_temp_monthly uses numerical keys if monthIndex is number. Assuming string keys based on JSON example.
-  const monthKey = String(monthIndex);
-  return destination?.avg_temp_monthly?.[monthKey]?.avg ?? null;
-}
-
-/**
- * Calculates the midpoint of a numerical range.
- * @param {[number, number]} range - The range [min, max].
- * @returns {number} The midpoint.
- */
-function calculateMidpoint(range) {
-  // Ensure range exists and has two numbers
-  if (!Array.isArray(range) || range.length !== 2 || typeof range[0] !== 'number' || typeof range[1] !== 'number') {
-    // Handle invalid range, maybe return a default or throw error?
-    // Returning null might be safer if climate score relies on it.
-    return null;
-  }
-  return (range[0] + range[1]) / 2;
-}
 
 /**
  * Gets the 1-based index for a month name.
@@ -157,20 +58,6 @@ function averageVector(vectors) {
   }
 
   return sumVector.map(sum => sum / vectors.length);
-}
-
-/**
- * Calculates a climate score based on a Gaussian (bell curve) distribution.
- * @param {number} avgTemp - The average temperature of the destination month.
- * @param {number} desiredMid - The midpoint of the user's desired temperature range.
- * @param {number} [sigma=5] - Controls the steepness of the curve. Smaller sigma = steeper drop-off.
- * @returns {number} The climate score (0 to 1).
- */
-function gaussianClimateScore(avgTemp, desiredMid, sigma = 5) {
-  if (avgTemp === null || desiredMid === null) return 0; // Handle null inputs
-  const delta = avgTemp - desiredMid;
-  // Clamp the score between 0 and 1, although exp should naturally be in this range for real inputs.
-  return Math.max(0, Math.min(1, Math.exp(-(delta * delta) / (2 * sigma * sigma))));
 }
 
 /**
@@ -214,6 +101,7 @@ async function calculateRecommendations(userPreferences, allDestinations) {
   }
 
   // --- Step 1: Process User Feedback (Destination Ratings) ---
+  // Extract features from destinations the user has rated previously
   console.log('--- Step 1: Processing User Feedback (Destination Ratings) ---');
   const likedDestinationFeatures = [];
   const dislikedDestinationFeatures = [];
@@ -250,6 +138,8 @@ async function calculateRecommendations(userPreferences, allDestinations) {
   console.log('--- Finished Step 1 ---');
 
   // --- Step 2: Calculate Feedback Adjustment Vector ---
+  // Average feature vectors from liked and disliked destinations 
+  // and compute their difference to determine how to adjust preferences
   console.log('--- Step 2: Calculating Feedback Adjustment Vector ---');
 
   // Use the helper function, default to zero vector if no likes/dislikes
@@ -266,6 +156,7 @@ async function calculateRecommendations(userPreferences, allDestinations) {
   console.log('--- Finished Step 2 ---');
 
   // --- Step 3: Normalize Adjustments and Prepare Analysis Object ---
+  // Convert raw delta scores to discrete adjustment values (-1, 0, 1) for better interpretability
   console.log('--- Step 3: Normalizing Adjustments and Preparing Analysis ---');
 
   // Apply the ceiling normalization based on user description
@@ -324,7 +215,9 @@ async function calculateRecommendations(userPreferences, allDestinations) {
 
 
   // --- Step 4: Apply Adjustments to User Preferences ---
+  // Modify the original user preference values based on feedback analysis
   console.log('--- Step 4: Applying Adjustments to User Preferences ---');
+
   // Apply Destination Feedback Adjustments (if analysis exists)
   if (userPreferences.destinationAnalysis) {
     console.log("Applying destination feedback adjustments directly to userPreferences...");
@@ -348,7 +241,9 @@ async function calculateRecommendations(userPreferences, allDestinations) {
   console.log('--- Finished Step 4 ---');
 
   // --- Step 5: Prepare User Data Vectors and Parameters ---
+  // Create the theme vector that will be used for content filtering
   console.log('--- Step 5: Preparing User Data ---');
+
   // Define User Theme Vector (Now uses potentially updated preferences)
   const userThemeVector = [
     userPreferences.culture,
@@ -368,19 +263,24 @@ async function calculateRecommendations(userPreferences, allDestinations) {
   console.log('--- Finished Step 5 ---');
 
   // --- Step 6: Calculate Collaborative Scores (Using Imported Function) ---
+  // Get collaborative filtering scores based on similarities between destinations
   console.log('--- Step 6: Calculating Collaborative Scores ---');
-  // Remove the itemSimilarityData parameter from the call
+
+  // Fetch collaborative scores from the collaborativeFiltering module
   const collabScores = await calculateCollaborativeScores(userPreferences, allDestinations);
   console.log('--- Finished Step 6 ---');
 
   // --- Step 7: Calculate Content Scores (Using Imported Function) ---
+  // Get content-based scores using feature similarity
   console.log('--- Step 7: Calculating Content Scores ---');
-  // This now calls the function from contentFiltering.js
+
+  // Get content scores from the contentFiltering module
   const contentScoresMap = calculateContentScores(userPreferences, allDestinations, userThemeVector);
   console.log('--- Finished Step 7 ---');
 
 
   // --- Step 8: Combine Scores, Post-Process, Rank, Map Confidence ---
+  // Blend content and collaborative scores to create final recommendations
   console.log('--- Step 8: Combining Scores and Post-Processing Results ---');
 
   // Combine content and collaborative scores, calculate hybrid score

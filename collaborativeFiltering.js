@@ -1,5 +1,13 @@
+/**
+ * @fileoverview Collaborative filtering implementation for the Travolo recommendation engine
+ * 
+ * This module provides collaborative filtering functionality by analyzing similarities
+ * between destinations based on user ratings. It maintains a cache of the similarity 
+ * matrix to improve performance and provides functions to calculate collaborative scores.
+ */
+
 // --- Item Similarity Cache & Fetching Logic ---
-let simCache = null; // Simple in-memory cache for item similarity, managed locally
+let similarityMatrixCache = null; // Simple in-memory cache for item similarity matrix
 
 /**
  * Fetches the item similarity matrix from Supabase, caches it, 
@@ -7,11 +15,13 @@ let simCache = null; // Simple in-memory cache for item similarity, managed loca
  * @returns {Promise<object>} - The similarity matrix structured as { itemId: [ {id, sim}, ... ] }
  */
 async function getItemSimilarity() {
-  if (simCache) {
+  // Return cached version if available to improve performance
+  if (similarityMatrixCache) {
     console.log("Returning cached item similarity matrix (from collaborativeFiltering).");
-    return simCache; // Return cached copy
+    return similarityMatrixCache;
   }
 
+  // Set up Supabase client
   const { createClient } = require('@supabase/supabase-js');
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_KEY;
@@ -22,7 +32,8 @@ async function getItemSimilarity() {
   }
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  console.log("Fetching item similarity matrix from Supabase (within collaborativeFiltering)...", supabaseUrl);
+  // Fetch similarity data from database
+  console.log("Fetching item similarity matrix from Supabase (within collaborativeFiltering)...");
   const { data, error } = await supabase
     .from('item_similarity')
     .select('item_id, neighbour_id, sim');
@@ -32,24 +43,29 @@ async function getItemSimilarity() {
     throw error; // Re-throw the error
   }
 
-  // Reshape → { itemId: [ {id, sim}, … ] }
+  // Reshape data into a more efficient lookup structure: { itemId: [ {id, sim}, … ] }
   console.log("Reshaping and caching item similarity matrix (within collaborativeFiltering).");
-  simCache = data.reduce((acc, row) => {
-    (acc[row.item_id] ??= []).push({ id: row.neighbour_id, sim: row.sim });
-    return acc;
+  similarityMatrixCache = data.reduce((accumulator, row) => {
+    // Create array for this item if it doesn't exist yet
+    if (!accumulator[row.item_id]) {
+      accumulator[row.item_id] = [];
+    }
+    // Add this neighbor and similarity
+    accumulator[row.item_id].push({ id: row.neighbour_id, sim: row.sim });
+    return accumulator;
   }, {});
 
-  return simCache;
+  return similarityMatrixCache;
 }
 
 /**
  * Invalidates the local item similarity cache.
+ * Call this when the similarity matrix is updated in the database.
  */
 function invalidateSimilarityCache() {
   console.log("Invalidating item similarity cache (within collaborativeFiltering).");
-  simCache = null;
+  similarityMatrixCache = null;
 }
-// --- End Item Similarity ---
 
 /**
  * Calculates collaborative filtering scores for destinations based on user likes and item similarities.
@@ -58,10 +74,8 @@ function invalidateSimilarityCache() {
  * @param {object[]} allDestinations - Array of all destination objects, used to iterate candidates.
  * @returns {Promise<object>} An object mapping destination IDs to their collaborative scores: { destId: score, ... }.
  */
-// Make the function asynchronous
 async function calculateCollaborativeScores(userPreferences, allDestinations) {
-
-  // --- Fetch Item Similarity Data (now uses local function) ---
+  // --- Fetch Item Similarity Data --- 
   let itemSimilarityData = {};
   try {
     // Fetch and cache the similarity matrix
@@ -80,36 +94,36 @@ async function calculateCollaborativeScores(userPreferences, allDestinations) {
   }
 
   // --- Extract Liked and Rated Destinations --- 
-  const likedDestIds = [];
-  const ratedDestIds = new Set(); // Keep track of all destinations rated by the user
+  const likedDestinationIds = [];
+  const ratedDestinationIds = new Set(); // Keep track of all destinations rated by the user
 
   // Extract liked destination IDs and populate the set of all rated destinations
   if (userPreferences.destinationRatings) {
     for (const [destId, rating] of Object.entries(userPreferences.destinationRatings)) {
-      ratedDestIds.add(destId);
+      ratedDestinationIds.add(destId);
       if (rating === 'like') {
-        likedDestIds.push(destId);
+        likedDestinationIds.push(destId);
       }
     }
   }
 
   // If the user hasn't liked any destinations, collaborative filtering cannot be applied.
-  if (likedDestIds.length === 0) {
+  if (likedDestinationIds.length === 0) {
     console.log("No liked destinations found for user, skipping collaborative filtering.");
     return {}; // Return empty scores
   }
 
-  console.log(`Calculating collaborative scores based on ${likedDestIds.length} liked destinations: [${likedDestIds.join(', ')}]`);
+  console.log(`Calculating collaborative scores based on ${likedDestinationIds.length} liked destinations: [${likedDestinationIds.join(', ')}]`);
 
   // --- Calculate Scores --- 
-  const collabScores = {};
+  const collaborativeScores = {};
 
   // Iterate through all candidate destinations
   for (const destination of allDestinations) {
     const candidateId = destination.id;
 
     // Skip destinations the user has already rated (liked or disliked)
-    if (ratedDestIds.has(candidateId)) {
+    if (ratedDestinationIds.has(candidateId)) {
       continue;
     }
 
@@ -117,9 +131,8 @@ async function calculateCollaborativeScores(userPreferences, allDestinations) {
     let scoreDenominator = 0;
 
     // Iterate through the destinations the user LIKED
-    for (const likedId of likedDestIds) {
+    for (const likedId of likedDestinationIds) {
       // Find the similarity between the liked item (likedId) and the candidate item (candidateId)
-      // The data structure is { likedId: [ {id: neighbourId, sim: similarity}, ... ] }
       const neighboursOfLikedItem = itemSimilarityData[likedId] || [];
       const neighbourEntry = neighboursOfLikedItem.find(neighbour => neighbour.id === candidateId);
       const similarity = neighbourEntry ? neighbourEntry.sim : 0;
@@ -137,14 +150,12 @@ async function calculateCollaborativeScores(userPreferences, allDestinations) {
     const finalScore = scoreDenominator > 0 ? scoreNumerator / scoreDenominator : 0;
 
     if (finalScore > 0) {
-      collabScores[candidateId] = finalScore;
-      // Optional: Log detailed scores per candidate for debugging
-      // console.log(`  Collab score for ${candidateId}: ${finalScore.toFixed(4)}`);
+      collaborativeScores[candidateId] = finalScore;
     }
   }
 
-  console.log(`Calculated collaborative scores for ${Object.keys(collabScores).length} destinations.`);
-  return collabScores;
+  console.log(`Calculated collaborative scores for ${Object.keys(collaborativeScores).length} destinations.`);
+  return collaborativeScores;
 }
 
 // Use CommonJS exports for Node.js

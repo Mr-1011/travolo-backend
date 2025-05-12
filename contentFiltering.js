@@ -1,5 +1,14 @@
+/**
+ * @fileoverview Content-based filtering implementation for the Travolo recommendation engine
+ * 
+ * This module provides content-based recommendation functionality by analyzing the
+ * similarity between user preferences and destination attributes. It calculates
+ * various scores (theme similarity, climate match, budget, etc.) and combines them
+ * into a final content score.
+ */
+
 // ====================
-// Helper Functions (Moved from recommendationAlgorithm.js)
+// Helper Functions
 // ====================
 
 /**
@@ -62,10 +71,14 @@ function haversineDistance(coords1, coords2) {
 function mapBudgetToNumber(budgetString) {
   if (!budgetString) return null;
   const lowerCaseBudget = budgetString.toLowerCase();
-  if (lowerCaseBudget === 'budget') return 1;
-  if (lowerCaseBudget === 'mid-range') return 2;
-  if (lowerCaseBudget === 'luxury') return 3;
-  return null;
+
+  const budgetMap = {
+    'budget': 1,
+    'mid-range': 2,
+    'luxury': 3
+  };
+
+  return budgetMap[lowerCaseBudget] || null;
 }
 
 /**
@@ -77,12 +90,16 @@ function mapDurationToDays(durationLabel) {
   if (!durationLabel) return null;
   // Normalize to handle variations like 'Day trip' vs 'day-trip' and case
   const lowerCaseDuration = durationLabel.toLowerCase().replace(' ', '-');
-  if (lowerCaseDuration === 'day-trip') return 1;
-  if (lowerCaseDuration === 'weekend') return 2; // Using 2 days for weekend threshold
-  if (lowerCaseDuration === 'short-trip') return 4; // Using 4 days for short trip threshold
-  if (lowerCaseDuration === 'one-week') return 7; // Using 7 days for one week threshold
-  if (lowerCaseDuration === 'long-trip') return 10; // Using 10 days as the start for long trip threshold
-  return null;
+
+  const durationMap = {
+    'day-trip': 1,
+    'weekend': 2,       // Using 2 days for weekend threshold
+    'short-trip': 4,    // Using 4 days for short trip threshold
+    'one-week': 7,      // Using 7 days for one week threshold
+    'long-trip': 10     // Using 10 days as the start for long trip threshold
+  };
+
+  return durationMap[lowerCaseDuration] || null;
 }
 
 /**
@@ -93,7 +110,6 @@ function mapDurationToDays(durationLabel) {
  */
 function getAverageTemperature(destination, monthIndex) {
   // Ensure monthIndex is treated as a string key if avg_temp_monthly keys are strings '1', '2', etc.
-  // Or ensure avg_temp_monthly uses numerical keys if monthIndex is number. Assuming string keys based on JSON example.
   const monthKey = String(monthIndex);
   return destination?.avg_temp_monthly?.[monthKey]?.avg ?? null;
 }
@@ -105,9 +121,8 @@ function getAverageTemperature(destination, monthIndex) {
  */
 function calculateMidpoint(range) {
   // Ensure range exists and has two numbers
-  if (!Array.isArray(range) || range.length !== 2 || typeof range[0] !== 'number' || typeof range[1] !== 'number') {
-    // Handle invalid range, maybe return a default or throw error?
-    // Returning null might be safer if climate score relies on it.
+  if (!Array.isArray(range) || range.length !== 2 ||
+    typeof range[0] !== 'number' || typeof range[1] !== 'number') {
     return null;
   }
   return (range[0] + range[1]) / 2;
@@ -165,18 +180,29 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
   const userTravelDurations = userPreferences.travelDuration?.map(d => d.toLowerCase().replace(' ', '-')) || [];
   const hasOrigin = userPreferences.originLocation?.lat != null && userPreferences.originLocation?.lon != null;
 
-  allDestinations.forEach(d => {
-    const scores = { id: d.id }; // Initialize score object for this destination
+  // Define scoring weights for different factors
+  const weights = {
+    theme: 0.35,
+    climate: 0.15,
+    budget: 0.10,
+    region: 0.25,
+    durationMatch: 0.10,
+    distance: 0.05
+  };
 
+  // Calculate scores for each destination
+  allDestinations.forEach(destination => {
+    const scores = { id: destination.id }; // Initialize score object for this destination
+
+    // 1. Theme Score - calculate similarity between user preferences and destination themes
     const destThemeVector = [
-      d.culture, d.adventure, d.nature, d.beaches,
-      d.nightlife, d.cuisine, d.wellness, d.urban, d.seclusion
+      destination.culture, destination.adventure, destination.nature, destination.beaches,
+      destination.nightlife, destination.cuisine, destination.wellness, destination.urban, destination.seclusion
     ].map(v => v ?? 0);
 
-    // 1. Theme Score
     scores.themeScore = cosineSimilarity(userThemeVector, destThemeVector);
 
-    // 2. Climate Score
+    // 2. Climate Score - check if destination temperatures match user's preferred range
     if (userTravelMonths.length > 0 && userPreferences.temperatureRange) {
       const monthlyClimateScores = [];
       const userMidTemp = calculateMidpoint(userPreferences.temperatureRange);
@@ -184,7 +210,7 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
         userTravelMonths.forEach(monthName => {
           const monthIndex = getMonthIndex(monthName);
           if (monthIndex) {
-            const avgTemp = getAverageTemperature(d, monthIndex);
+            const avgTemp = getAverageTemperature(destination, monthIndex);
             if (avgTemp !== null) {
               monthlyClimateScores.push(gaussianClimateScore(avgTemp, userMidTemp, 5));
             }
@@ -196,10 +222,10 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
       }
     }
 
-    // 3. Budget Score
+    // 3. Budget Score - determine if destination budget level matches user's budget preference
     if (userTravelBudgets.length > 0) {
       const userLevels = userTravelBudgets.map(mapBudgetToNumber).filter(n => n !== null);
-      const destLevelNum = mapBudgetToNumber(d.budget_level);
+      const destLevelNum = mapBudgetToNumber(destination.budget_level);
       if (userLevels.length > 0 && destLevelNum !== null) {
         if (userLevels.includes(destLevelNum)) {
           scores.budgetScore = 1;
@@ -210,14 +236,14 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
       }
     }
 
-    // 4. Region Score
-    if (userPreferredRegions.length > 0 && d.region) {
-      const regionMatch = userPreferredRegions.includes(d.region.toLowerCase());
+    // 4. Region Score - check if destination region matches user's preferred regions
+    if (userPreferredRegions.length > 0 && destination.region) {
+      const regionMatch = userPreferredRegions.includes(destination.region.toLowerCase());
       scores.regionScore = regionMatch ? 1 : 0.3;
     }
 
-    // 5a. Duration Match Score
-    const destIdealDurations = d.ideal_durations?.map(dur => dur.toLowerCase().replace(' ', '-')) || [];
+    // 5a. Duration Match Score - check if destination's ideal durations match user preferences
+    const destIdealDurations = destination.ideal_durations?.map(dur => dur.toLowerCase().replace(' ', '-')) || [];
     if (userTravelDurations.length > 0) {
       if (destIdealDurations.length > 0) {
         const userDurationsSet = new Set(userTravelDurations);
@@ -230,14 +256,16 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
       scores.durationMatchScore = 0.8;
     }
 
-    // 5b. Distance Score
-    if (hasOrigin && d.latitude != null && d.longitude != null) {
+    // 5b. Distance Score - calculate based on haversine distance and apply penalties for short trips to far places
+    if (hasOrigin && destination.latitude != null && destination.longitude != null) {
       const km = haversineDistance(
         { lat: userPreferences.originLocation.lat, lon: userPreferences.originLocation.lon },
-        { lat: d.latitude, lon: d.longitude }
+        { lat: destination.latitude, lon: destination.longitude }
       );
       let baseDistanceScore = 1 / (1 + Math.pow(km / 2000, 2));
       let penaltyMultiplier = 1;
+
+      // Apply duration-based distance penalties
       if (userTravelDurations.length > 0) {
         const userDays = userTravelDurations.map(mapDurationToDays).filter(days => days !== null);
         if (userDays.length > 0) {
@@ -252,21 +280,23 @@ function calculateContentScores(userPreferences, allDestinations, userThemeVecto
       scores.distanceScore = baseDistanceScore * penaltyMultiplier;
     }
 
-    // 6. Content Blend (Weighted Score)
-    const weights = { theme: 0.35, climate: 0.20, budget: 0.10, region: 0.20, durationMatch: 0.10, distance: 0.05 };
+    // 6. Content Blend - Create weighted average of all applicable scores
     let weightedSum = 0;
     let weightSum = 0;
+
     for (const key in weights) {
       const scoreKey = `${key}Score`;
-      if (scores[scoreKey] !== undefined && scores[scoreKey] !== null && typeof scores[scoreKey] === 'number' && !isNaN(scores[scoreKey])) {
+      if (scores[scoreKey] !== undefined && scores[scoreKey] !== null &&
+        typeof scores[scoreKey] === 'number' && !isNaN(scores[scoreKey])) {
         weightedSum += weights[key] * scores[scoreKey];
         weightSum += weights[key];
       }
     }
+
     scores.contentScore = (weightSum > 0) ? weightedSum / weightSum : 0;
 
     // Add the calculated scores for this destination to the map
-    contentScoresMap[d.id] = scores;
+    contentScoresMap[destination.id] = scores;
   });
 
   return contentScoresMap;
