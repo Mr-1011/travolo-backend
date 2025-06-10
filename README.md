@@ -204,7 +204,7 @@ Content-Type: application/json
       "country": "Japan",
       "confidence": 87,
       "image_url": "https://...",
-      // ... other destination details
+      ... other destination details
     }
   ]
 }
