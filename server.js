@@ -12,28 +12,24 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Initialize Supabase client
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("Supabase URL or Key not provided in .env file");
-  process.exit(1); // Exit if Supabase credentials are missing
+  process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Configure Multer for memory storage
 const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // Limit file size to 10MB
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-// Endpoint to get random destinations
 app.get('/api/destinations/random', async (req, res) => {
   try {
-    // Call Supabase function to get random destinations
     const { data, error } = await supabase.rpc('get_random_destinations', { limit_count: 10 });
 
     if (error) {
@@ -53,11 +49,10 @@ app.get('/api/destinations/random', async (req, res) => {
   }
 });
 
-// Endpoint to receive images and preferences for analysis
 app.post('/api/preferences/analyze-images', upload.array('images', 3), async (req, res) => {
   try {
     const files = req.files;
-    const preferencesString = req.body.preferences; // Stringified JSON preferences
+    const preferencesString = req.body.preferences;
 
     if (!files || files.length === 0) {
       return res.status(400).json({ error: 'No image files uploaded.' });
@@ -69,7 +64,6 @@ app.post('/api/preferences/analyze-images', upload.array('images', 3), async (re
 
     console.log(`Received ${files.length} images for analysis.`);
 
-    // Parse the preferences string
     let currentPreferences;
     try {
       currentPreferences = JSON.parse(preferencesString);
@@ -78,10 +72,8 @@ app.post('/api/preferences/analyze-images', upload.array('images', 3), async (re
       return res.status(400).json({ error: 'Invalid preferences JSON format.' });
     }
 
-    // Pass files and parsed preferences to the image analysis service
     const analysisResult = await analyzeImagesWithOpenAI(files, currentPreferences);
 
-    // Prepare the full response
     const responsePayload = {
       message: `Successfully received and analyzed ${files.length} images.`,
       analysis: analysisResult
@@ -98,17 +90,14 @@ app.post('/api/preferences/analyze-images', upload.array('images', 3), async (re
   }
 });
 
-// Endpoint to create recommendations based on user preferences
 app.post('/api/recommendations', async (req, res) => {
   try {
-    const userPreferences = req.body; // JSON object of user preferences
+    const userPreferences = req.body;
 
-    // Validate preferences object
     if (!userPreferences || typeof userPreferences !== 'object' || Object.keys(userPreferences).length === 0) {
       return res.status(400).json({ error: 'User preferences object is missing or empty in request body.' });
     }
 
-    // Call the recommendation service
     const result = await generateRecommendations(userPreferences);
 
     res.status(200).json(result);
@@ -119,13 +108,11 @@ app.post('/api/recommendations', async (req, res) => {
   }
 });
 
-// Endpoint to submit feedback for a specific destination
 app.post('/api/destinations/:destinationId/feedback', async (req, res) => {
   try {
     const { destinationId } = req.params;
     const { feedback } = req.body;
 
-    // Basic validation
     if (!destinationId) {
       return res.status(400).json({ error: 'Destination ID is required.' });
     }
@@ -133,18 +120,16 @@ app.post('/api/destinations/:destinationId/feedback', async (req, res) => {
       return res.status(400).json({ error: 'Feedback text is required and cannot be empty.' });
     }
 
-    // Insert feedback into Supabase
     const { data, error } = await supabase
       .from('destination_feedback')
       .insert([
         { destination_id: destinationId, feedback_text: feedback.trim() },
       ])
-      .select(); // Return the inserted data
+      .select();
 
     if (error) {
       console.error('Error inserting destination feedback:', error);
-      // Handle foreign key violation (invalid destinationId)
-      if (error.code === '23503') { // PostgreSQL foreign key violation code
+      if (error.code === '23503') {
         return res.status(404).json({ error: `Destination with ID ${destinationId} not found.`, details: error.message });
       }
       return res.status(500).json({ error: 'Failed to submit feedback', details: error.message });
@@ -159,13 +144,11 @@ app.post('/api/destinations/:destinationId/feedback', async (req, res) => {
   }
 });
 
-// Endpoint to submit like/dislike feedback for a recommended destination within a recommendation set
 app.post('/api/recommendations/:recommendationId/feedback', async (req, res) => {
   try {
     const { recommendationId } = req.params;
-    const { destinationId, feedback } = req.body; // Expects { destinationId: "uuid", feedback: "like" | "dislike" }
+    const { destinationId, feedback } = req.body;
 
-    // --- Input Validation ---
     if (!recommendationId) {
       return res.status(400).json({ error: 'Recommendation ID is required in the URL path.' });
     }
@@ -176,28 +159,24 @@ app.post('/api/recommendations/:recommendationId/feedback', async (req, res) => 
       return res.status(400).json({ error: 'Feedback must be either "like" or "dislike".' });
     }
 
-    // --- Fetch the specific recommendation record ---
     const { data: recommendation, error: fetchError } = await supabase
       .from('recommendations')
       .select('destination_1_id, destination_2_id, destination_3_id')
       .eq('id', recommendationId)
-      .single(); // Expect exactly one record
+      .single();
 
     if (fetchError) {
       console.error('Error fetching recommendation record:', fetchError);
-      // Check for record not found error
-      if (fetchError.code === 'PGRST116') { // PostgREST code for no rows found when single() is used
+      if (fetchError.code === 'PGRST116') {
         return res.status(404).json({ error: `Recommendation record with ID ${recommendationId} not found.` });
       }
       return res.status(500).json({ error: 'Failed to fetch recommendation record', details: fetchError.message });
     }
 
     if (!recommendation) {
-      // This case should technically be covered by single() error handling, but good as a fallback
       return res.status(404).json({ error: `Recommendation record with ID ${recommendationId} not found.` });
     }
 
-    // --- Determine which feedback field (destination_1_feedback, etc.) to update ---
     let feedbackFieldToUpdate = null;
     if (recommendation.destination_1_id === destinationId) {
       feedbackFieldToUpdate = 'destination_1_feedback';
@@ -211,13 +190,12 @@ app.post('/api/recommendations/:recommendationId/feedback', async (req, res) => 
       return res.status(400).json({ error: `Destination ID ${destinationId} does not match any destination in recommendation record ${recommendationId}.` });
     }
 
-    // --- Update the feedback field in the recommendations table ---
     const updatePayload = { [feedbackFieldToUpdate]: feedback };
     const { data: updateData, error: updateError } = await supabase
       .from('recommendations')
       .update(updatePayload)
       .eq('id', recommendationId)
-      .select('id'); // Select the ID to confirm the update
+      .select('id');
 
     if (updateError) {
       console.error('Error updating recommendation feedback:', updateError);
