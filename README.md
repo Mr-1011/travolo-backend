@@ -121,7 +121,7 @@ Returns 10 random destinations for exploration.
     "culture": 4,
     "adventure": 4,
     "nature": 5,
-    // ... other destination properties
+     ... other destination properties
   }
 ]
 ```
