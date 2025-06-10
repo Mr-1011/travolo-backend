@@ -121,7 +121,6 @@ Returns 10 random destinations for exploration.
     "culture": 4,
     "adventure": 4,
     "nature": 5,
-     ... other destination properties
   }
 ]
 ```
@@ -204,7 +203,6 @@ Content-Type: application/json
       "country": "Japan",
       "confidence": 87,
       "image_url": "https://...",
-      ... other destination details
     }
   ]
 }
@@ -233,7 +231,7 @@ Content-Type: application/json
 ```json
 {
   "destinationId": "destination-uuid",
-  "feedback": "like" // or "dislike"
+  "feedback": "like"
 }
 ```
 
