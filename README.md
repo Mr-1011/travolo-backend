@@ -40,7 +40,7 @@ A sophisticated travel recommendation engine that uses AI-powered image analysis
    - Provides recommendations based on similar users' preferences
 
 4. **Image Analysis Service** (`services/imageService.js`)
-   - Integrates with OpenAI GPT-4 Vision API
+   - Integrates with OpenAI GPT-4o Vision API
    - Analyzes travel photos to extract preference insights
    - Updates user preference scores based on visual cues
 
